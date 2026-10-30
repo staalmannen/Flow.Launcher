@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading.Tasks;
 using System.Windows.Media.Imaging;
@@ -15,6 +16,7 @@ using System.Xml;
 using Windows.ApplicationModel.Core;
 using System.Windows.Input;
 using MemoryPack;
+using Windows.Win32.UI.Shell;
 
 namespace Flow.Launcher.Plugin.Program.Programs
 {
@@ -510,12 +512,49 @@ namespace Flow.Launcher.Plugin.Program.Programs
 
         private void Launch(bool elevated = false)
         {
+            // ActivateApplication cannot elevate; "runas" needs the shell
+            if (!elevated && TryActivate())
+            {
+                return;
+            }
+
             string command = "shell:AppsFolder\\" + UserModelId;
             command = Environment.ExpandEnvironmentVariables(command.Trim());
 
             var info = new ProcessStartInfo(command) { UseShellExecute = true, Verb = elevated ? "runas" : "" };
 
             Main.StartProcess(Process.Start, info);
+        }
+
+        // Starts the app with the API documented for packaged apps. Unlike "shell:AppsFolder\<AUMID>",
+        // which goes through Explorer's shell namespace, it also works when Explorer is not running
+        // (another shell, such as Cairo or a tiling window manager, replaces it)
+        private unsafe bool TryActivate()
+        {
+            object manager = null;
+            try
+            {
+                manager = new ApplicationActivationManager();
+                fixed (char* id = UserModelId)
+                {
+                    ((IApplicationActivationManager)manager).ActivateApplication(id, null,
+                        ACTIVATEOPTIONS.AO_NONE, out _);
+                }
+                return true;
+            }
+            catch (Exception e) when (e is COMException or InvalidCastException)
+            {
+                ProgramLogger.LogException($"|UWP|TryActivate|{Location}" +
+                                           $"|Unable to activate {UserModelId}, starting it through the shell", e);
+                return false;
+            }
+            finally
+            {
+                if (manager != null)
+                {
+                    Marshal.ReleaseComObject(manager);
+                }
+            }
         }
 
         internal static bool IfAppCanRunElevated(XmlNode appNode)

@@ -20,3 +20,6 @@ PropVariantClear
 VARENUM
 INFOTIPSIZE
 MAX_PATH
+IApplicationActivationManager
+ApplicationActivationManager
+ACTIVATEOPTIONS
