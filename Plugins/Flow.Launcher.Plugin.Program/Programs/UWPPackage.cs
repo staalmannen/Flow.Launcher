@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media.Imaging;
 using Windows.ApplicationModel;
@@ -16,6 +17,8 @@ using System.Xml;
 using Windows.ApplicationModel.Core;
 using System.Windows.Input;
 using MemoryPack;
+using Windows.Win32;
+using Windows.Win32.System.Com;
 using Windows.Win32.UI.Shell;
 
 namespace Flow.Launcher.Plugin.Program.Programs
@@ -528,23 +531,35 @@ namespace Flow.Launcher.Plugin.Program.Programs
 
         // Starts the app with the API documented for packaged apps. Unlike "shell:AppsFolder\<AUMID>",
         // which goes through Explorer's shell namespace, it also works when Explorer is not running
-        // (another shell, such as Cairo or a tiling window manager, replaces it)
-        private unsafe bool TryActivate()
+        // (another shell, such as Cairo or a tiling window manager, replaces it).
+        // As PowerShell does it: from an STA thread, with CLSCTX_ALL. Created the default way (as
+        // "new ApplicationActivationManager()" does), activation failed without Explorer.
+        private bool TryActivate()
         {
-            object manager = null;
+            bool started = false;
+            var thread = new Thread(() => started = Activate());
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+            return started;
+        }
+
+        private unsafe bool Activate()
+        {
+            IApplicationActivationManager manager = null;
             try
             {
-                manager = new ApplicationActivationManager();
+                PInvoke.CoCreateInstance(typeof(ApplicationActivationManager).GUID, null,
+                    CLSCTX.CLSCTX_ALL, out manager).ThrowOnFailure();
                 fixed (char* id = UserModelId)
                 {
-                    ((IApplicationActivationManager)manager).ActivateApplication(id, null,
-                        ACTIVATEOPTIONS.AO_NONE, out _);
+                    manager.ActivateApplication(id, null, ACTIVATEOPTIONS.AO_NONE, out _);
                 }
                 return true;
             }
             catch (Exception e) when (e is COMException or InvalidCastException)
             {
-                ProgramLogger.LogException($"|UWP|TryActivate|{Location}" +
+                ProgramLogger.LogException($"|UWP|Activate|{Location}" +
                                            $"|Unable to activate {UserModelId}, starting it through the shell", e);
                 return false;
             }

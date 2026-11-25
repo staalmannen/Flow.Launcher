@@ -23,3 +23,5 @@ MAX_PATH
 IApplicationActivationManager
 ApplicationActivationManager
 ACTIVATEOPTIONS
+CoCreateInstance
+CLSCTX
